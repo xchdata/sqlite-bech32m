@@ -61,11 +61,14 @@ static void bech32m_encode_fn(
   uint8_t data[64];
   size_t data_len = 0;
   ok = convert_bits(data, &data_len, 5, input, input_len, 8, 1);
-  assert(ok);
+  assert(ok);  // convert_bits with padding cannot fail.
 
   char output[92];
   ok = bech32_encode(output, hrp, data, data_len);
-  assert(ok);
+  if (!ok) {
+    sqlite3_result_error(ctx, "bech32 encoding failed. Invalid char in prefix? Too long?", -1);
+    return;
+  }
 
   sqlite3_result_text(ctx, output, -1, SQLITE_TRANSIENT);
 }
