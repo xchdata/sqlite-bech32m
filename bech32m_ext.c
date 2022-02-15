@@ -26,6 +26,7 @@ SQLITE_EXTENSION_INIT1
 #include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 extern int bech32_encode(
@@ -73,6 +74,52 @@ static void bech32m_encode_fn(
   sqlite3_result_text(ctx, output, -1, SQLITE_TRANSIENT);
 }
 
+static void blob_from_hex_fn(
+  sqlite3_context *ctx,
+  int argc,
+  sqlite3_value **argv
+) {
+  static int8_t nib[] = {
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+     0,  1,  2,  3,  4,  5,  6,  7,  8,  9, -1, -1, -1, -1, -1, -1,
+    -1, 10, 11, 12, 13, 14, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, 10, 11, 12, 13, 14, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  };
+
+  int ok;
+  assert(argc == 1);
+
+  const char *hex = sqlite3_value_text(argv[0]);
+  size_t hex_len = strlen(hex);
+  if (hex_len % 2) {
+    sqlite3_result_error(ctx, "invalid length", -1);
+    return;
+  }
+
+  size_t result_len = hex_len / 2;
+  uint8_t *result = malloc(result_len);
+  for (int i = 0; i < result_len; ++i) {
+    char hi = hex[i * 2];
+    char lo = hex[i * 2 + 1];
+    if (hi > 128 || nib[hi] == -1) {
+      sqlite3_result_error(ctx, "invalid character", -1);
+      goto fin;
+    }
+    if (lo > 128 || nib[lo] == -1) {
+      sqlite3_result_error(ctx, "invalid character", -1);
+      goto fin;
+    }
+    result[i] = (nib[hi] << 4) + nib[lo];
+  }
+  sqlite3_result_blob(ctx, result, result_len, SQLITE_TRANSIENT);
+fin:
+  free(result);
+}
+
 #ifdef _WIN32
 __declspec(dllexport)
 #endif
@@ -88,5 +135,12 @@ int sqlite3_bechm_init(
       SQLITE_UTF8|SQLITE_INNOCUOUS|SQLITE_DETERMINISTIC,
       NULL, bech32m_encode_fn, NULL, NULL
   );
+  assert(rc == SQLITE_OK);
+  rc = sqlite3_create_function(
+      db, "blob_from_hex", 1,
+      SQLITE_UTF8|SQLITE_INNOCUOUS|SQLITE_DETERMINISTIC,
+      NULL, blob_from_hex_fn, NULL, NULL
+  );
+  assert(rc == SQLITE_OK);
   return rc;
 }
